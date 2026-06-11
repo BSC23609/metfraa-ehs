@@ -1,16 +1,35 @@
 // ============================================================================
-// Admin Charts — 5 bar charts for project/site breakdowns:
+// Admin Charts — 5 bar charts for project/site breakdowns + summary tile.
 //
 //   1. Toolbox Talks         — vertical bars per project
 //   2. Inductions            — vertical bars per project
 //   3. EHS Audit             — grouped bars (unsafe acts + conditions) per project
 //   4. Incidents/Accidents   — stacked bars (Major/Minor/Near Miss/Unspecified) per project
 //   5. Permit Records        — vertical bars per site
+//   6. Summary tile          — period totals at-a-glance
 //
-// Date filter has presets: Today, Yesterday, This Week, This Month, This Year + custom.
+// View modes (page sizes):
+//   1x1 -> 1 chart per page, 6 pages
+//   2x1 -> 2 charts per page, 3 pages
+//   2x2 -> 4 charts per page, 2 pages
+//   3x2 -> all 6 on one page (default)
+//
+// Always-hidden: projects with "test" in the name (case-insensitive). The
+// server filters them out before sending data.
 // ============================================================================
 
 let lastData = null;
+
+// View mode state — persisted in localStorage
+const VIEW_MODES = {
+  '1x1': { perPage: 1, cols: 1 },
+  '2x1': { perPage: 2, cols: 2 },
+  '2x2': { perPage: 4, cols: 2 },
+  '3x2': { perPage: 6, cols: 3 },
+};
+let viewMode = localStorage.getItem('chartsViewMode') || '3x2';
+if (!VIEW_MODES[viewMode]) viewMode = '3x2';
+let viewPage = 0;
 
 (async function init() {
   let me;
@@ -59,6 +78,32 @@ let lastData = null;
       applyPreset(btn.dataset.preset);
       loadCharts();
     });
+  });
+
+  // View mode buttons — switch grid layout + reset to page 0
+  document.querySelectorAll('.view-mode-btn').forEach(btn => {
+    if (btn.dataset.view === viewMode) {
+      btn.classList.add('view-mode-btn--active');
+    } else {
+      btn.classList.remove('view-mode-btn--active');
+    }
+    btn.addEventListener('click', () => {
+      viewMode = btn.dataset.view;
+      viewPage = 0;
+      localStorage.setItem('chartsViewMode', viewMode);
+      document.querySelectorAll('.view-mode-btn').forEach(b => b.classList.remove('view-mode-btn--active'));
+      btn.classList.add('view-mode-btn--active');
+      if (lastData) renderPage();
+    });
+  });
+
+  // Pagination arrows
+  document.getElementById('pager-prev').addEventListener('click', () => {
+    if (viewPage > 0) { viewPage--; renderPage(); }
+  });
+  document.getElementById('pager-next').addEventListener('click', () => {
+    const totalPages = Math.ceil(6 / VIEW_MODES[viewMode].perPage);
+    if (viewPage < totalPages - 1) { viewPage++; renderPage(); }
   });
 
   await loadCharts();
@@ -158,7 +203,14 @@ function render(data) {
       : '');
   projectSelect.value = currentSelection || data.projectFilter || '';
 
-  // Compute summary totals for the 6th tile
+  // Reset to first page when new data loads
+  viewPage = 0;
+  renderPage();
+}
+
+// Compose the 6 tile HTML strings — exposed so renderPage can build the current
+// view-mode slice.
+function buildAllTiles(data) {
   const totals = {
     tbt: sumCount(data.toolbox),
     induction: sumCount(data.induction),
@@ -168,35 +220,65 @@ function render(data) {
     permits: sumCount(data.permitRecord),
   };
 
+  return [
+    chartSection({
+      id: 'toolbox',
+      title: 'Toolbox Talks',
+      subtitle: 'TBTs per project',
+      data: data.toolbox,
+      total: totals.tbt,
+    }),
+    chartSection({
+      id: 'induction',
+      title: 'Inductions',
+      subtitle: 'Inductions per project',
+      data: data.induction,
+      total: totals.induction,
+    }),
+    ehsAuditChartSection(data.ehsAudit),
+    incidentChartSection(data.incident),
+    chartSection({
+      id: 'permit',
+      title: 'Permit Records',
+      subtitle: 'Permits per site',
+      data: data.permitRecord,
+      total: totals.permits,
+      labelHeader: 'Site',
+    }),
+    summaryTile(totals, data),
+  ];
+}
+
+// Render the currently-visible page slice based on viewMode + viewPage.
+// Called when: new data loads, view mode changes, page changes.
+function renderPage() {
+  if (!lastData) return;
+  const tiles = buildAllTiles(lastData);
+  const perPage = VIEW_MODES[viewMode].perPage;
+  const totalPages = Math.ceil(tiles.length / perPage);
+  if (viewPage >= totalPages) viewPage = 0;
+
+  const start = viewPage * perPage;
+  const end = Math.min(start + perPage, tiles.length);
+  const visible = tiles.slice(start, end);
+
   document.getElementById('charts-mount').innerHTML = `
-    <div class="charts-grid">
-      ${chartSection({
-        id: 'toolbox',
-        title: 'Toolbox Talks',
-        subtitle: 'TBTs per project',
-        data: data.toolbox,
-        total: totals.tbt,
-      })}
-      ${chartSection({
-        id: 'induction',
-        title: 'Inductions',
-        subtitle: 'Inductions per project',
-        data: data.induction,
-        total: totals.induction,
-      })}
-      ${ehsAuditChartSection(data.ehsAudit)}
-      ${incidentChartSection(data.incident)}
-      ${chartSection({
-        id: 'permit',
-        title: 'Permit Records',
-        subtitle: 'Permits per site',
-        data: data.permitRecord,
-        total: totals.permits,
-        labelHeader: 'Site',
-      })}
-      ${summaryTile(totals, data)}
+    <div class="charts-grid" data-view="${viewMode}">
+      ${visible.join('')}
     </div>
   `;
+
+  // Update pager UI
+  const pager = document.getElementById('view-pager');
+  const status = document.getElementById('pager-status');
+  if (totalPages > 1) {
+    pager.style.display = '';
+    status.textContent = `Page ${viewPage + 1} of ${totalPages}`;
+    document.getElementById('pager-prev').disabled = viewPage === 0;
+    document.getElementById('pager-next').disabled = viewPage === totalPages - 1;
+  } else {
+    pager.style.display = 'none';
+  }
 }
 
 // ----------------------------------------------------------------------------

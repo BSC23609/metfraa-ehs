@@ -184,3 +184,161 @@
     height: 220px;
   }
 }
+
+/* ============================================================================
+   View mode selector + pagination
+   ============================================================================ */
+
+.view-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.view-modes {
+  display: flex;
+  gap: 4px;
+  background: var(--paper-2);
+  padding: 4px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+}
+
+.view-mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  transition: all 0.12s;
+}
+.view-mode-btn:hover {
+  background: var(--paper-3);
+  color: var(--ink-1);
+}
+.view-mode-btn--active {
+  background: var(--brand-blue) !important;
+  color: white !important;
+}
+.view-mode-btn--active svg { stroke: white; }
+.view-mode-btn svg {
+  flex-shrink: 0;
+}
+
+.view-pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pager-btn {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--brand-blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pager-btn:hover:not(:disabled) {
+  background: var(--brand-blue);
+  color: white;
+  border-color: var(--brand-blue);
+}
+.pager-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.pager-status {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  min-width: 100px;
+  text-align: center;
+}
+
+/* ============================================================================
+   Per-mode grid layouts
+   ============================================================================ */
+
+/* 1x1 — one big chart at a time, larger fonts and more breathing room */
+.charts-grid[data-view="1x1"] {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto;
+}
+.charts-grid[data-view="1x1"] .chart-section {
+  min-height: 480px;
+}
+.charts-grid[data-view="1x1"] .chart-wrap,
+.charts-grid[data-view="1x1"] .chart-wrap--tall,
+.charts-grid[data-view="1x1"] .chart-wrap--xtall {
+  height: 420px;
+}
+.charts-grid[data-view="1x1"] .dash-section__head h3 {
+  font-size: 22px;
+}
+.charts-grid[data-view="1x1"] .chart-subtitle {
+  font-size: 13px;
+}
+.charts-grid[data-view="1x1"] .summary-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+.charts-grid[data-view="1x1"] .summary-cell__num { font-size: 40px; }
+
+/* 2x1 — two charts side-by-side */
+.charts-grid[data-view="2x1"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto;
+}
+.charts-grid[data-view="2x1"] .chart-section { min-height: 420px; }
+.charts-grid[data-view="2x1"] .chart-wrap,
+.charts-grid[data-view="2x1"] .chart-wrap--tall,
+.charts-grid[data-view="2x1"] .chart-wrap--xtall {
+  height: 340px;
+}
+.charts-grid[data-view="2x1"] .dash-section__head h3 { font-size: 16px; }
+.charts-grid[data-view="2x1"] .chart-subtitle { font-size: 12px; }
+.charts-grid[data-view="2x1"] .summary-cell__num { font-size: 32px; }
+
+/* 2x2 — 2x2 grid, four charts per page */
+.charts-grid[data-view="2x2"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, auto);
+}
+.charts-grid[data-view="2x2"] .chart-section { min-height: 320px; }
+.charts-grid[data-view="2x2"] .chart-wrap,
+.charts-grid[data-view="2x2"] .chart-wrap--tall,
+.charts-grid[data-view="2x2"] .chart-wrap--xtall {
+  height: 260px;
+}
+.charts-grid[data-view="2x2"] .dash-section__head h3 { font-size: 15px; }
+.charts-grid[data-view="2x2"] .summary-cell__num { font-size: 28px; }
+
+/* 3x2 stays the existing layout (default in the base .charts-grid rules) */
+
+/* Smooth fade between page transitions */
+.charts-grid {
+  transition: opacity 0.15s;
+}
+.charts-grid.is-changing {
+  opacity: 0.4;
+}
+
+@media (max-width: 720px) {
+  .view-modes { flex-wrap: wrap; }
+  .view-mode-btn span { display: none; }  /* icons only on mobile */
+}

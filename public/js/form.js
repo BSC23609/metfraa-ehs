@@ -25,6 +25,10 @@ let activeProjects = [];
     me = meRes;
     form = formRes;
     activeProjects = projectsRes;
+    console.log('[form.js] loaded form:', form.id, '- projects available:', activeProjects.length);
+    if (activeProjects.length === 0) {
+      console.warn('[form.js] NO PROJECTS returned from /api/projects — dropdown will fall back to text input.');
+    }
   } catch (err) {
     document.getElementById('form-mount').innerHTML = `<p>Form not found.</p>`;
     return;
@@ -102,6 +106,14 @@ function renderFields() {
 }
 
 function renderField(f) {
+  // Defensive: if a project_name or site_name field still arrives as type 'text'
+  // (e.g. server's forms-config.js didn't deploy or browser is showing a stale form),
+  // force-render the project dropdown anyway. This guarantees the dropdown shows up
+  // even if upstream config got out of sync.
+  if (f.type === 'text' && (f.key === 'project_name' || f.key === 'site_name')) {
+    console.warn('[form.js] field', f.key, 'arrived as text — forcing project dropdown');
+    f = Object.assign({}, f, { type: 'project' });
+  }
   const required = f.required ? '<span class="req">*</span>' : '';
   const isFull = ['textarea', 'photo'].includes(f.type);
   const wrap = (inner) => `

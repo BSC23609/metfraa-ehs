@@ -165,15 +165,30 @@ router.get('/charts', async (req, res) => {
       return aliasMap.get(lower) || raw.trim() || '(unspecified)';
     };
 
-    // Filter helper — date range + status (approved only) + optional project filter
+    // ALWAYS-ON FILTER: anything with "test" in the name (case-insensitive) is
+    // hidden from charts entirely. This applies to:
+    //   - aliased names (the canonical resolved name)
+    //   - raw free-text names that don't match any alias
+    // The match is on the substring "test" so "TEST5", "test1", "TestProject"
+    // all get filtered out. Settings page is NOT affected — admins can still
+    // rename or delete these projects there.
+    const isTestProject = (resolvedName) => {
+      if (!resolvedName) return false;
+      return /test/i.test(String(resolvedName));
+    };
+
+    // Filter helper — date range + status (approved only) + always-hide test
+    // projects + optional project filter.
     const inRangeApproved = (r, projectField) => {
       const d = String(r.submittedAt || '').slice(0, 10);
       if (d < startDate || d > endDate) return false;
       const s = (r.status || '').toLowerCase();
       if (s !== 'approved' && s !== '') return false;
+      const resolved = resolveName(projectField);
+      // Always exclude "test" projects from charts
+      if (isTestProject(resolved)) return false;
       // Optional project filter applied AFTER alias resolution
       if (projectFilter) {
-        const resolved = resolveName(projectField);
         if (resolved !== projectFilter) return false;
       }
       return true;
@@ -244,7 +259,9 @@ router.get('/charts', async (req, res) => {
     res.json({
       range: { startDate, endDate },
       projectFilter: projectFilter || null,
-      availableProjects: allProjects.map(p => ({ id: p.id, name: p.name, active: p.active })),
+      availableProjects: allProjects
+        .filter(p => !isTestProject(p.name))
+        .map(p => ({ id: p.id, name: p.name, active: p.active })),
       toolbox: toolboxByProject,
       induction: inductionByProject,
       ehsAudit,

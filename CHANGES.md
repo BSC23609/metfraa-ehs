@@ -1,151 +1,99 @@
-# Projects Management + 3x2 Grid Charts
+# Three fixes — June 2026
 
-Adds a projects database (dropdown for forms, settings page for admins)
-and reorganizes the charts into a 3x2 tile grid with a project filter.
+## 1. Project dropdowns on forms (debugging + defensive fix)
 
-## What you get
+ISSUE: After the previous deploy, the "Project Name" field in forms was
+still rendering as free text instead of a dropdown.
 
-### 1. Project dropdown on every form
-All 21 forms used to have a free-text "Project Name" / "Site Name" field.
-Now it's a dropdown populated from the projects list. Same shared list for
-both "Project" and "Site" fields.
+CAUSE: Most likely one of:
+  - server/lib/forms-config.js didn't deploy (so the API still emits type='text')
+  - Browser cached the old form.js (so even if API sends type='project', the
+    new case in the switch wasn't there to handle it)
+  - /api/projects returned empty (so the dropdown fell back to text input)
 
-Default seed projects (created automatically on first run):
-- AMNS Site - Oragadam
-- KGISL Auditorium
-- Patanjali
-- Apollo
+FIX: form.js now does TWO things:
+  a. If a field comes through with type='text' but its key is 'project_name'
+     or 'site_name', it forces the project-dropdown rendering anyway.
+     This guarantees the dropdown shows even if forms-config.js didn't deploy.
+  b. Logs to browser console exactly what was loaded.
 
-### 2. Settings page at /admin-settings (admin-only)
-Full CRUD for projects:
-- Add new project (with optional aliases)
-- Rename project
-- Deactivate / Reactivate (deactivated projects hide from form dropdowns
-  but still appear on charts for historical context)
-- Manage aliases (legacy free-text names that should map to this project)
-- Delete project permanently
+HOW TO VERIFY AFTER DEPLOY:
+  - Open any form
+  - Open browser DevTools (F12) -> Console tab
+  - Look for: "[form.js] loaded form: <id> - projects available: <count>"
+  - If count is 0, you'll also see: "NO PROJECTS returned from /api/projects"
+  - If you see "field project_name arrived as text — forcing project dropdown"
+    that means forms-config.js didn't deploy and form.js is patching around it
+    (the dropdown still works, but you should investigate why forms-config
+    didn't reach the server)
 
-### 3. Alias support for old free-text entries
-Existing master log rows have free-text values like "TEST5",
-"AMNS site - Oragadam", "test", etc. By adding these as aliases to a
-project, they automatically roll up to the canonical name on charts.
+## 2. Hide "test" projects from charts
 
-Example workflow:
-1. Open /admin-settings
-2. Click "Edit" on "AMNS Site - Oragadam"
-3. In the Aliases field, add (one per line):
-     TEST5
-     AMNS
-     amns oragadam
-4. Save
-5. Charts now show all those old entries under "AMNS Site - Oragadam"
+Anything with "test" in the name (case-insensitive) is now ALWAYS filtered
+out of the charts page. This applies to:
+  - Chart bars (resolved names AND raw free-text names)
+  - The "Project" filter dropdown above the charts
+  - The Summary tile counts
 
-Unmatched free-text entries appear under their raw name on the chart
-(e.g. random old "TEST" entries that aren't aliased to anything). You
-can either alias them or ignore them.
+NOTES:
+  - Substring match: "TEST5", "test1", "TestProject" all get hidden
+  - Aliased values are checked AFTER resolution, so if you've aliased "TEST5"
+    to "AMNS Site - Oragadam", "AMNS Site - Oragadam" still shows (not hidden)
+  - Test projects still appear in /admin-settings (so you can rename/delete)
+  - Test projects still show in /submissions page (master log truth)
+  - Existing aliases for legacy "test" names still resolve normally; they
+    only get hidden if the RESOLVED name contains "test"
 
-### 4. 3x2 grid charts layout
-The 5 charts now display in a 3x2 tile grid (was vertical scroll):
+## 3. Grid view selector with pagination
 
-  Row 1: Toolbox Talks  |  Inductions  |  EHS Audit
-  Row 2: Incidents      |  Permits     |  Summary
+NEW: 4 view-mode buttons above the charts: 1×1, 2×1, 2×2, 3×2.
 
-The Summary tile in slot 6 shows period totals at-a-glance across all
-forms (TBTs, Inductions, Unsafe Acts, Unsafe Conditions, Incidents,
-Permits) plus a count of active projects.
+Each button = page size:
+  1×1 — 1 chart per page (6 pages total)
+  2×1 — 2 charts per page (3 pages)
+  2×2 — 4 charts per page (2 pages)
+  3×2 — all 6 charts on one page (1 page, no arrows)
 
-All 6 tiles fit on one screen for a single screenshot.
+Left/right arrows appear when more than one page exists.
+Page status shown in the middle ("Page 2 of 3").
+Selection persists in browser localStorage (sticks per user).
 
-### 5. Project filter on charts page
-New dropdown above the charts: "Project ▼ [All projects | AMNS… | …]".
-Selecting a project filters all 5 charts to show only that project's
-data — including alias-resolved historical entries.
+Chart fonts and tile sizes auto-scale per mode:
+  1×1 — large fonts, 420px chart height, summary in 3 columns
+  2×1 — medium fonts, 340px chart height
+  2×2 — smaller fonts, 260px chart height
+  3×2 — current compact layout
 
-## Where projects live (technical)
+## Files in this update (5 total)
 
-Stored as JSON at:
-  Metfraa-EHS/_config/projects.json   (in OneDrive)
+### MODIFIED files (5)
+- server/routes/admin-charts.js   - hides "test" projects from data
+- public/admin-charts.html        - adds view-mode toolbar UI
+- public/css/admin-charts.css     - per-mode grid layouts + toolbar styles
+- public/js/admin-charts.js       - view mode state, pagination, renderPage()
+- public/js/form.js               - defensive project dropdown fallback + debug logging
 
-Created automatically with the 4 seed projects on first read if missing.
-Cached server-side for 30 seconds. Cache busts on any CRUD operation
-and when approvals happen.
-
-## Files in this update
-
-### NEW files (5)
-- server/lib/projects-store.js        - read/write projects.json + alias lookup
-- server/routes/admin-settings.js     - CRUD API
-- public/admin-settings.html          - settings page
-- public/css/admin-settings.css       - settings styles
-- public/js/admin-settings.js         - settings client logic
-
-### MODIFIED files (10)
-- server/index.js                     - wires up settings routes + page
-- server/lib/forms-config.js          - changes 21 fields from 'text' to 'project'
-- server/routes/admin-charts.js       - alias resolution + project filter param
-- public/admin-charts.html            - project filter dropdown in filter bar
-- public/css/admin-charts.css         - 3x2 grid layout + summary tile styles
-- public/js/admin-charts.js           - grid rendering + summary tile + filter wiring
-- public/dashboard.html               - adds Settings link (admin only)
-- public/admin-dashboard.html         - adds Settings link in header nav
-- public/js/dashboard.js              - shows Settings link for admins
-- public/js/form.js                   - renders dropdown for project-type fields
+No new files in this drop, just patches to existing.
 
 ## How to apply
 
-1. Drop these 15 files into your repo (matching folder structure)
-2. Commit and push to GitHub
+1. Drop these 5 files into your repo (matching folder structure)
+2. Commit and push
 3. Render auto-deploys
-4. Sign in as admin → "Settings" → see the 4 seed projects already there
-5. Click "Charts" → see the new 3x2 layout
+4. **HARD-REFRESH your browser** (Ctrl+Shift+R or Cmd+Shift+R) to bust
+   any cached form.js or admin-charts.js from before — this is important
+   because browser caching is one likely cause of the dropdown bug
+5. Verify all 3 fixes in the order above
 
-## Test checklist after deploy
+## Troubleshooting if dropdowns still don't appear
 
-1. /admin-settings shows 4 active projects (auto-seeded)
-2. Click "Edit" on a project, add an alias, Save → no errors
-3. Click "Deactivate" → project moves to "Deactivated" section
-4. Click "Reactivate" → back to active
-5. Open any form (e.g. Toolbox Talks) → "Project Name" is now a dropdown
-6. Submit a form using one of the dropdown values → approves normally
-7. /admin-charts now shows 3x2 tile layout with 6th slot = Summary
-8. Click "Project" dropdown filter → select a project → all charts
-   filter to that project only
-9. Manage aliases for a project, set them to match old free-text values,
-   refresh charts → old entries now grouped under canonical project name
-
-## Migration tips for existing data
-
-Your existing forms had free-text project names. To clean up the charts:
-
-1. Visit /admin-charts (default = This Month) — see what raw names appear
-2. For each raw name that should map to one of your real projects:
-   a. Open /admin-settings
-   b. Click Edit on the target project
-   c. Add the raw name as an alias
-   d. Save
-3. Charts auto-update — that raw name now rolls up to the canonical name
-4. Any leftover raw names that are genuine test data — either leave them
-   (they'll show as their own bars), or create a "Test / Other" project
-   and alias them under it
-
-## Behavior notes
-
-- Forms now FORCE selecting from the dropdown — users can't type a custom
-  project name. If their site isn't listed, an admin must add it first.
-  For admins, the form shows a "Manage projects →" link below the dropdown
-  for quick access.
-- Deactivated projects still appear in the chart project filter dropdown
-  (in a separate "Deactivated" optgroup) so admins can review their history.
-- Deleting a project removes it from the dropdown but does NOT delete any
-  master log rows. The historical data lives in OneDrive master logs forever.
-- Aliases are case-insensitive ("test5" matches "TEST5" matches "Test5").
-- An empty projects.json (e.g. you delete all 4 seeds) makes form dropdowns
-  fall back to free-text inputs as a safety net.
-
-## What didn't change
-
-- The approval workflow (forms still go to pending → approver reviews → approved)
-- The Incident form's Accident Type field (still required radio)
-- Master log column layouts
-- Existing Approved submissions and their PDFs
-- Authentication and login flow
+Open a form, then DevTools (F12 -> Console):
+  - Look for "[form.js] loaded form: ..." log
+  - If "projects available: 0":
+      Open /api/projects in a new tab while signed in
+      If it returns []: no projects in OneDrive _config/projects.json yet
+        Go to /admin-settings -> add a project manually to seed it
+      If it returns the projects but form still shows text input:
+        Hard-refresh again (browser is still cached)
+  - If you don't see the log at all:
+      form.js didn't deploy. Confirm public/js/form.js timestamp on Render
