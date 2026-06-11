@@ -1,0 +1,488 @@
+// ============================================================================
+// Admin Charts — 5 bar charts for project/site breakdowns:
+//
+//   1. Toolbox Talks         — vertical bars per project
+//   2. Inductions            — vertical bars per project
+//   3. EHS Audit             — grouped bars (unsafe acts + conditions) per project
+//   4. Incidents/Accidents   — stacked bars (Major/Minor/Near Miss/Unspecified) per project
+//   5. Permit Records        — vertical bars per site
+//
+// Date filter has presets: Today, Yesterday, This Week, This Month, This Year + custom.
+// ============================================================================
+
+let lastData = null;
+
+(async function init() {
+  let me;
+  try {
+    me = await fetch('/api/me').then(r => {
+      if (!r.ok) throw new Error('Not authenticated');
+      return r.json();
+    });
+  } catch {
+    location.href = '/login';
+    return;
+  }
+
+  if (!me.isAdmin) {
+    document.querySelector('main').innerHTML = `
+      <div class="empty-state">
+        <span class="empty-state__icon">🔒</span>
+        <div class="empty-state__title">Admin only</div>
+        <div class="empty-state__hint">This page is restricted to admin users.</div>
+        <a href="/" class="btn-submit">Back to dashboard</a>
+      </div>`;
+    return;
+  }
+
+  document.getElementById('user-pill').innerHTML = `
+    <div class="app-header__user">
+      ${me.picture ? `<img src="${me.picture}" alt="">` : ''}
+      <div>
+        <div class="app-header__user-name">${escapeHtml(me.name)}</div>
+        <div class="app-header__user-email">${escapeHtml(me.email)}</div>
+      </div>
+    </div>`;
+
+  // Default range: this month
+  applyPreset('this-month');
+
+  // Event handlers
+  document.getElementById('apply-range').addEventListener('click', () => loadCharts());
+  document.getElementById('refresh-btn').addEventListener('click', () => loadCharts(true));
+
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('preset-btn--active'));
+      btn.classList.add('preset-btn--active');
+      applyPreset(btn.dataset.preset);
+      loadCharts();
+    });
+  });
+
+  await loadCharts();
+})();
+
+// Compute date range for each preset and set the input values
+function applyPreset(preset) {
+  const today = new Date();
+  let start = new Date(today);
+  let end = new Date(today);
+
+  switch (preset) {
+    case 'today':
+      // start = end = today
+      break;
+    case 'yesterday':
+      start.setDate(today.getDate() - 1);
+      end.setDate(today.getDate() - 1);
+      break;
+    case 'this-week':
+      // Week starts on Monday in India; getDay() returns 0=Sun..6=Sat
+      const dayOfWeek = today.getDay();
+      const daysToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      start.setDate(today.getDate() - daysToMon);
+      break;
+    case 'this-month':
+      start.setDate(1);
+      break;
+    case 'this-year':
+      start = new Date(today.getFullYear(), 0, 1);
+      break;
+    default:
+      start.setDate(today.getDate() - 29);
+  }
+
+  document.getElementById('filter-start').value = formatYmd(start);
+  document.getElementById('filter-end').value = formatYmd(end);
+}
+
+async function loadCharts(forceFresh = false) {
+  const mount = document.getElementById('charts-mount');
+  mount.innerHTML = '<div class="loading">Loading charts…</div>';
+
+  const startDate = document.getElementById('filter-start').value;
+  const endDate = document.getElementById('filter-end').value;
+  if (!startDate || !endDate) {
+    mount.innerHTML = '<div class="empty-state"><div class="empty-state__title">Pick a date range</div></div>';
+    return;
+  }
+  if (startDate > endDate) {
+    mount.innerHTML = '<div class="empty-state"><div class="empty-state__title">Invalid range</div><div class="empty-state__hint">Start date must be on or before end date.</div></div>';
+    return;
+  }
+
+  if (forceFresh) {
+    try { await fetch('/api/admin/charts/cache-clear', { method: 'POST' }); } catch {}
+  }
+
+  try {
+    const data = await fetch(`/api/admin/charts?startDate=${startDate}&endDate=${endDate}`).then(r => {
+      if (!r.ok) return r.json().then(j => Promise.reject(new Error(j.error || `HTTP ${r.status}`)));
+      return r.json();
+    });
+    lastData = data;
+    render(data);
+  } catch (err) {
+    mount.innerHTML = `<div class="empty-state">
+      <span class="empty-state__icon">⚠️</span>
+      <div class="empty-state__title">Failed to load</div>
+      <div class="empty-state__hint">${escapeHtml(err.message)}</div>
+    </div>`;
+  }
+}
+
+function render(data) {
+  document.getElementById('range-subtitle').textContent =
+    `${formatDateLong(data.range.startDate)} → ${formatDateLong(data.range.endDate)}`;
+
+  document.getElementById('charts-mount').innerHTML = `
+    ${chartSection({
+      id: 'toolbox',
+      title: 'Toolbox Talks',
+      subtitle: 'Number of TBTs conducted per project',
+      data: data.toolbox,
+      total: sumCount(data.toolbox),
+    })}
+    ${chartSection({
+      id: 'induction',
+      title: 'Inductions',
+      subtitle: 'Number of inductions conducted per project',
+      data: data.induction,
+      total: sumCount(data.induction),
+    })}
+    ${ehsAuditChartSection(data.ehsAudit)}
+    ${incidentChartSection(data.incident)}
+    ${chartSection({
+      id: 'permit',
+      title: 'Permit Records',
+      subtitle: 'Number of permits recorded per site',
+      data: data.permitRecord,
+      total: sumCount(data.permitRecord),
+      labelHeader: 'Site',
+    })}
+  `;
+}
+
+// ----------------------------------------------------------------------------
+// Single-metric chart (TBT, Induction, Permit) — vertical bars
+// ----------------------------------------------------------------------------
+
+function chartSection({ id, title, subtitle, data, total, labelHeader }) {
+  const labelText = labelHeader || 'Project';
+  if (!data || data.length === 0) {
+    return emptySection(id, title, subtitle);
+  }
+
+  const maxVal = Math.max(1, ...data.map(d => d.count));
+  const ySteps = niceMax(maxVal);
+
+  // Chart dimensions — fixed viewBox, scales responsively
+  const VB_W = 1000;
+  const VB_H = 320;
+  const M_TOP = 24;
+  const M_BOTTOM = 100;   // room for rotated project labels
+  const M_LEFT = 56;
+  const M_RIGHT = 16;
+  const PLOT_W = VB_W - M_LEFT - M_RIGHT;
+  const PLOT_H = VB_H - M_TOP - M_BOTTOM;
+
+  const barSlotW = PLOT_W / data.length;
+  const barW = Math.min(48, Math.max(8, barSlotW * 0.6));
+
+  // Y-axis lines + labels
+  const yLines = [];
+  for (let t = 0; t <= 4; t++) {
+    const val = Math.round((ySteps / 4) * t);
+    const y = M_TOP + PLOT_H - (val / ySteps) * PLOT_H;
+    yLines.push(`<line x1="${M_LEFT}" y1="${y}" x2="${VB_W - M_RIGHT}" y2="${y}" stroke="#E5E5E5" stroke-width="1"/>`);
+    yLines.push(`<text x="${M_LEFT - 8}" y="${y + 4}" text-anchor="end" font-size="12" fill="#999">${val}</text>`);
+  }
+
+  // Bars
+  const bars = data.map((d, i) => {
+    const cx = M_LEFT + i * barSlotW + barSlotW / 2;
+    const barX = cx - barW / 2;
+    const barH = (d.count / ySteps) * PLOT_H;
+    const barY = M_TOP + PLOT_H - barH;
+
+    const totalLabel = `<text x="${cx.toFixed(2)}" y="${(barY - 6).toFixed(2)}" text-anchor="middle" font-size="12" fill="#5A5A5A" font-weight="700">${d.count}</text>`;
+
+    // Rotated project label
+    const labelY = M_TOP + PLOT_H + 14;
+    const truncatedLabel = truncateLabel(d.label, 28);
+    const xLabel = `<text x="${cx.toFixed(2)}" y="${labelY}" text-anchor="end" font-size="11" fill="#2A2A2A" transform="rotate(-40 ${cx.toFixed(2)} ${labelY})">${escapeHtml(truncatedLabel)}</text>`;
+
+    return `<g>
+      <rect x="${barX.toFixed(2)}" y="${barY.toFixed(2)}" width="${barW.toFixed(2)}" height="${barH.toFixed(2)}" fill="#005B96" rx="2">
+        <title>${escapeHtml(d.label)}: ${d.count}</title>
+      </rect>
+      ${totalLabel}
+      ${xLabel}
+    </g>`;
+  }).join('');
+
+  return `
+    <section class="dash-section chart-section" id="chart-${id}">
+      <div class="dash-section__head">
+        <div>
+          <h3>${escapeHtml(title)}</h3>
+          <div class="chart-subtitle">${escapeHtml(subtitle)} · Total: <strong>${total}</strong></div>
+        </div>
+      </div>
+      <div class="chart-wrap chart-wrap--tall">
+        <svg viewBox="0 0 ${VB_W} ${VB_H}" preserveAspectRatio="xMidYMid meet" class="chart-svg" xmlns="http://www.w3.org/2000/svg">
+          ${yLines.join('')}
+          ${bars}
+          <text x="${VB_W / 2}" y="${VB_H - 8}" text-anchor="middle" font-size="12" fill="#5A5A5A" font-weight="600">${escapeHtml(labelText)}</text>
+        </svg>
+      </div>
+    </section>
+  `;
+}
+
+// ----------------------------------------------------------------------------
+// EHS Audit chart — grouped bars (unsafe acts vs unsafe conditions)
+// ----------------------------------------------------------------------------
+
+function ehsAuditChartSection(data) {
+  const title = 'EHS Audit';
+  const subtitle = 'Unsafe Acts vs Unsafe Conditions per project';
+
+  if (!data || data.length === 0) {
+    return emptySection('ehs-audit', title, subtitle);
+  }
+
+  const maxVal = Math.max(1, ...data.flatMap(d => [d.unsafeActs, d.unsafeConditions]));
+  const ySteps = niceMax(maxVal);
+
+  const VB_W = 1000, VB_H = 360;
+  const M_TOP = 24, M_BOTTOM = 110, M_LEFT = 56, M_RIGHT = 16;
+  const PLOT_W = VB_W - M_LEFT - M_RIGHT;
+  const PLOT_H = VB_H - M_TOP - M_BOTTOM;
+
+  const groupSlotW = PLOT_W / data.length;
+  const barW = Math.min(28, Math.max(4, groupSlotW * 0.35));
+  const innerGap = 2;
+
+  const yLines = [];
+  for (let t = 0; t <= 4; t++) {
+    const val = Math.round((ySteps / 4) * t);
+    const y = M_TOP + PLOT_H - (val / ySteps) * PLOT_H;
+    yLines.push(`<line x1="${M_LEFT}" y1="${y}" x2="${VB_W - M_RIGHT}" y2="${y}" stroke="#E5E5E5" stroke-width="1"/>`);
+    yLines.push(`<text x="${M_LEFT - 8}" y="${y + 4}" text-anchor="end" font-size="12" fill="#999">${val}</text>`);
+  }
+
+  const bars = data.map((d, i) => {
+    const cx = M_LEFT + i * groupSlotW + groupSlotW / 2;
+    const leftBarX = cx - barW - innerGap / 2;
+    const rightBarX = cx + innerGap / 2;
+
+    const actsH = (d.unsafeActs / ySteps) * PLOT_H;
+    const condH = (d.unsafeConditions / ySteps) * PLOT_H;
+    const actsY = M_TOP + PLOT_H - actsH;
+    const condY = M_TOP + PLOT_H - condH;
+
+    const actsLabel = d.unsafeActs > 0
+      ? `<text x="${(leftBarX + barW / 2).toFixed(2)}" y="${(actsY - 5).toFixed(2)}" text-anchor="middle" font-size="10" fill="#C77A00" font-weight="700">${d.unsafeActs}</text>` : '';
+    const condLabel = d.unsafeConditions > 0
+      ? `<text x="${(rightBarX + barW / 2).toFixed(2)}" y="${(condY - 5).toFixed(2)}" text-anchor="middle" font-size="10" fill="#C0392B" font-weight="700">${d.unsafeConditions}</text>` : '';
+
+    const labelY = M_TOP + PLOT_H + 14;
+    const truncatedLabel = truncateLabel(d.project, 28);
+    const xLabel = `<text x="${cx.toFixed(2)}" y="${labelY}" text-anchor="end" font-size="11" fill="#2A2A2A" transform="rotate(-40 ${cx.toFixed(2)} ${labelY})">${escapeHtml(truncatedLabel)}</text>`;
+
+    return `<g>
+      <rect x="${leftBarX.toFixed(2)}" y="${actsY.toFixed(2)}" width="${barW.toFixed(2)}" height="${actsH.toFixed(2)}" fill="#C77A00" rx="2">
+        <title>${escapeHtml(d.project)}: ${d.unsafeActs} unsafe acts</title>
+      </rect>
+      <rect x="${rightBarX.toFixed(2)}" y="${condY.toFixed(2)}" width="${barW.toFixed(2)}" height="${condH.toFixed(2)}" fill="#C0392B" rx="2">
+        <title>${escapeHtml(d.project)}: ${d.unsafeConditions} unsafe conditions</title>
+      </rect>
+      ${actsLabel}
+      ${condLabel}
+      ${xLabel}
+    </g>`;
+  }).join('');
+
+  const totalActs = data.reduce((s, d) => s + d.unsafeActs, 0);
+  const totalCond = data.reduce((s, d) => s + d.unsafeConditions, 0);
+
+  return `
+    <section class="dash-section chart-section" id="chart-ehs-audit">
+      <div class="dash-section__head">
+        <div>
+          <h3>${title}</h3>
+          <div class="chart-subtitle">${subtitle} · Total: <strong>${totalActs}</strong> unsafe acts, <strong>${totalCond}</strong> unsafe conditions</div>
+        </div>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-dot" style="background:#C77A00"></span>Unsafe Acts</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#C0392B"></span>Unsafe Conditions</span>
+        </div>
+      </div>
+      <div class="chart-wrap chart-wrap--xtall">
+        <svg viewBox="0 0 ${VB_W} ${VB_H}" preserveAspectRatio="xMidYMid meet" class="chart-svg" xmlns="http://www.w3.org/2000/svg">
+          ${yLines.join('')}
+          ${bars}
+          <text x="${VB_W / 2}" y="${VB_H - 8}" text-anchor="middle" font-size="12" fill="#5A5A5A" font-weight="600">Project</text>
+        </svg>
+      </div>
+    </section>
+  `;
+}
+
+// ----------------------------------------------------------------------------
+// Incident chart — stacked bars (Major / Minor / Near Miss / Unspecified)
+// ----------------------------------------------------------------------------
+
+function incidentChartSection(data) {
+  const title = 'Incidents / Accidents';
+  const subtitle = 'Incident counts by accident type per project/site';
+
+  if (!data || data.length === 0) {
+    return emptySection('incident', title, subtitle);
+  }
+
+  const maxVal = Math.max(1, ...data.map(d => d.total));
+  const ySteps = niceMax(maxVal);
+
+  const VB_W = 1000, VB_H = 360;
+  const M_TOP = 24, M_BOTTOM = 110, M_LEFT = 56, M_RIGHT = 16;
+  const PLOT_W = VB_W - M_LEFT - M_RIGHT;
+  const PLOT_H = VB_H - M_TOP - M_BOTTOM;
+
+  const slotW = PLOT_W / data.length;
+  const barW = Math.min(48, Math.max(8, slotW * 0.6));
+
+  const yLines = [];
+  for (let t = 0; t <= 4; t++) {
+    const val = Math.round((ySteps / 4) * t);
+    const y = M_TOP + PLOT_H - (val / ySteps) * PLOT_H;
+    yLines.push(`<line x1="${M_LEFT}" y1="${y}" x2="${VB_W - M_RIGHT}" y2="${y}" stroke="#E5E5E5" stroke-width="1"/>`);
+    yLines.push(`<text x="${M_LEFT - 8}" y="${y + 4}" text-anchor="end" font-size="12" fill="#999">${val}</text>`);
+  }
+
+  const bars = data.map((d, i) => {
+    const cx = M_LEFT + i * slotW + slotW / 2;
+    const barX = cx - barW / 2;
+
+    // Stack: bottom to top — Major, Minor, Near Miss, Unspecified
+    let yCursor = M_TOP + PLOT_H;
+    const segments = [];
+
+    const drawSeg = (count, color, label) => {
+      if (count <= 0) return;
+      const segH = (count / ySteps) * PLOT_H;
+      yCursor -= segH;
+      segments.push(`<rect x="${barX.toFixed(2)}" y="${yCursor.toFixed(2)}" width="${barW.toFixed(2)}" height="${segH.toFixed(2)}" fill="${color}">
+        <title>${escapeHtml(d.project)} - ${label}: ${count}</title>
+      </rect>`);
+    };
+
+    drawSeg(d.major, '#C0392B', 'Major');
+    drawSeg(d.minor, '#C77A00', 'Minor');
+    drawSeg(d.nearMiss, '#F2B93B', 'Near Miss');
+    drawSeg(d.unspecified, '#9AA0A6', 'Unspecified');
+
+    const totalLabel = `<text x="${cx.toFixed(2)}" y="${(yCursor - 6).toFixed(2)}" text-anchor="middle" font-size="12" fill="#5A5A5A" font-weight="700">${d.total}</text>`;
+
+    const labelY = M_TOP + PLOT_H + 14;
+    const truncatedLabel = truncateLabel(d.project, 28);
+    const xLabel = `<text x="${cx.toFixed(2)}" y="${labelY}" text-anchor="end" font-size="11" fill="#2A2A2A" transform="rotate(-40 ${cx.toFixed(2)} ${labelY})">${escapeHtml(truncatedLabel)}</text>`;
+
+    return `<g>${segments.join('')}${totalLabel}${xLabel}</g>`;
+  }).join('');
+
+  const totals = data.reduce((acc, d) => {
+    acc.major += d.major;
+    acc.minor += d.minor;
+    acc.nearMiss += d.nearMiss;
+    acc.unspecified += d.unspecified;
+    return acc;
+  }, { major: 0, minor: 0, nearMiss: 0, unspecified: 0 });
+
+  return `
+    <section class="dash-section chart-section" id="chart-incident">
+      <div class="dash-section__head">
+        <div>
+          <h3>${title}</h3>
+          <div class="chart-subtitle">${subtitle} · Total: <strong>${totals.major}</strong> Major, <strong>${totals.minor}</strong> Minor, <strong>${totals.nearMiss}</strong> Near Miss${totals.unspecified > 0 ? `, <strong>${totals.unspecified}</strong> Unspecified` : ''}</div>
+        </div>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-dot" style="background:#C0392B"></span>Major</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#C77A00"></span>Minor</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#F2B93B"></span>Near Miss</span>
+          ${totals.unspecified > 0 ? `<span class="legend-item"><span class="legend-dot" style="background:#9AA0A6"></span>Unspecified</span>` : ''}
+        </div>
+      </div>
+      <div class="chart-wrap chart-wrap--xtall">
+        <svg viewBox="0 0 ${VB_W} ${VB_H}" preserveAspectRatio="xMidYMid meet" class="chart-svg" xmlns="http://www.w3.org/2000/svg">
+          ${yLines.join('')}
+          ${bars}
+          <text x="${VB_W / 2}" y="${VB_H - 8}" text-anchor="middle" font-size="12" fill="#5A5A5A" font-weight="600">Project / Site</text>
+        </svg>
+      </div>
+    </section>
+  `;
+}
+
+function emptySection(id, title, subtitle) {
+  return `
+    <section class="dash-section chart-section" id="chart-${id}">
+      <div class="dash-section__head">
+        <div>
+          <h3>${escapeHtml(title)}</h3>
+          <div class="chart-subtitle">${escapeHtml(subtitle)}</div>
+        </div>
+      </div>
+      <div class="empty-chart">
+        <span>📊</span>
+        <div>No data for the selected date range</div>
+      </div>
+    </section>
+  `;
+}
+
+// ----------------------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------------------
+
+function sumCount(arr) {
+  return (arr || []).reduce((s, x) => s + (x.count || 0), 0);
+}
+
+function niceMax(v) {
+  if (v <= 5) return 5;
+  if (v <= 10) return 10;
+  if (v <= 20) return 20;
+  if (v <= 50) return 50;
+  if (v <= 100) return 100;
+  if (v <= 200) return 200;
+  if (v <= 500) return 500;
+  return Math.ceil(v / 100) * 100;
+}
+
+function truncateLabel(s, n) {
+  s = String(s ?? '');
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+function formatYmd(d) {
+  // Format in IST so today's date matches what the user expects
+  const offset = 5.5 * 60;
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+function formatDateLong(s) {
+  if (!s) return '—';
+  const d = new Date(`${s}T00:00:00`);
+  if (isNaN(d)) return s;
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[c]);
+}

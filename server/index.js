@@ -11,6 +11,7 @@ const authRoutes = require('./routes/auth');
 const formRoutes = require('./routes/forms');
 const adminRoutes = require('./routes/admin');
 const adminDashboardRoutes = require('./routes/admin-dashboard');
+const adminChartsRoutes = require('./routes/admin-charts');
 const debugRoutes = require('./routes/debug');
 const submissionRoutes = require('./routes/submissions');
 const approvalRoutes = require('./routes/approvals');
@@ -121,6 +122,12 @@ app.use('/api/approvals', approvalRoutes);
 // --- Admin Dashboard API (admin only)
 app.use('/api/admin', adminDashboardRoutes);
 
+// --- Admin Charts API (admin only) — must come AFTER adminDashboardRoutes
+//     since both mount under /api/admin. Express tries routers in order; the
+//     charts router will handle /api/admin/charts, the dashboard handles
+//     /api/admin/dashboard. Other unmatched paths fall through.
+app.use('/api/admin', adminChartsRoutes);
+
 // --- Admin routes (legacy info page kept for now)
 app.use('/admin', adminRoutes);
 
@@ -137,6 +144,11 @@ app.get('/submissions', (req, res) => {
 // --- Admin Dashboard page (admin-only stats and analytics)
 app.get('/admin-dashboard', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'admin-dashboard.html'));
+});
+
+// --- Admin Charts page (admin-only project/site breakdowns)
+app.get('/admin-charts', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'admin-charts.html'));
 });
 
 // --- Approvals list page

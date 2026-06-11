@@ -19,6 +19,7 @@
   `;
   if (me.isAdmin) {
     document.getElementById('admin-link').style.display = '';
+    document.getElementById('charts-link').style.display = '';
   }
   if (me.isApprover) {
     document.getElementById('approvals-link').style.display = '';

@@ -111,6 +111,8 @@ const INCIDENT = {
     { key: 'designation',          label: 'Designation',                    type: 'text',     required: true },
     { key: 'incident_type',        label: 'Incident Type',                  type: 'select',   required: true,
       options: ['First Aid', 'Medical', 'Fatal', 'Near Miss', 'Dangerous Occurrence', 'Property Damage', 'Environmental'] },
+    { key: 'accident_type',        label: 'Accident Type',                  type: 'radio',    required: true,
+      options: ['Major', 'Minor', 'Near Miss'] },
     { key: 'injury_details',       label: 'Injury Details',                 type: 'textarea', required: true },
     { key: 'equipment_name',       label: 'Name / Identity of P&M / Equipment', type: 'text', required: false },
     { key: 'equipment_owned_by',   label: 'Equipment Owned By',             type: 'select',   required: false,

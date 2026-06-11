@@ -1,0 +1,57 @@
+/* ============================================================================
+   Admin Charts page — extends admin-dashboard.css
+   ============================================================================ */
+
+.chart-section {
+  margin-bottom: 22px;
+}
+
+.chart-subtitle {
+  font-size: 13px;
+  color: var(--ink-3);
+  margin-top: 4px;
+}
+.chart-subtitle strong {
+  color: var(--ink-1);
+  font-weight: 700;
+}
+
+/* Larger chart heights for the project breakdowns (more bars + rotated labels) */
+.chart-wrap--tall {
+  height: 380px;
+}
+.chart-wrap--xtall {
+  height: 440px;
+}
+
+/* Empty state for individual chart sections */
+.empty-chart {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 50px 20px;
+  color: var(--ink-4);
+  font-size: 14px;
+}
+.empty-chart span {
+  font-size: 36px;
+  margin-bottom: 8px;
+  opacity: 0.4;
+}
+
+/* Preset buttons — same look as admin-dashboard, but the preset names are
+   wider so allow more horizontal space */
+.preset-btn {
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .chart-wrap--tall { height: 300px; }
+  .chart-wrap--xtall { height: 340px; }
+  .chart-subtitle { font-size: 12px; }
+  .preset-buttons {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+}
