@@ -20,6 +20,7 @@
 const express = require('express');
 const ExcelJS = require('exceljs');
 const onedrive = require('../lib/onedrive');
+const projectsStore = require('../lib/projects-store');
 const { FORMS_BY_ID } = require('../lib/forms-config');
 const { requireAdmin } = require('../lib/auth-middleware');
 
@@ -128,7 +129,7 @@ function parseNum(v) {
 
 router.get('/charts', async (req, res) => {
   try {
-    let { startDate, endDate } = req.query;
+    let { startDate, endDate, project: projectFilter } = req.query;
 
     // Default: last 30 days
     if (!endDate) endDate = formatYmd(new Date());
@@ -141,34 +142,62 @@ router.get('/charts', async (req, res) => {
       return res.status(400).json({ error: 'startDate and endDate must be YYYY-MM-DD' });
     }
 
-    // Load all 5 master logs in parallel
-    const [toolboxRows, inductionRows, ehsAuditRows, incidentRows, permitRows] =
-      await Promise.all(CHART_FORMS.map(loadFormRows));
+    // Load all 5 master logs + the projects list in parallel
+    const [toolboxRows, inductionRows, ehsAuditRows, incidentRows, permitRows, allProjects] =
+      await Promise.all([
+        ...CHART_FORMS.map(loadFormRows),
+        projectsStore.listProjects().catch(() => []),
+      ]);
 
-    // Filter helper — date range + status (approved only)
-    const inRangeApproved = (r) => {
+    // Build an O(1) lookup table: lowercased raw value → canonical project name
+    // This includes both exact names AND aliases.
+    const aliasMap = new Map();
+    for (const p of allProjects) {
+      aliasMap.set(p.name.toLowerCase(), p.name);
+      for (const alias of (p.aliases || [])) {
+        const k = String(alias).trim().toLowerCase();
+        if (k) aliasMap.set(k, p.name);
+      }
+    }
+    const resolveName = (raw) => {
+      if (!raw) return '(unspecified)';
+      const lower = String(raw).trim().toLowerCase();
+      return aliasMap.get(lower) || raw.trim() || '(unspecified)';
+    };
+
+    // Filter helper — date range + status (approved only) + optional project filter
+    const inRangeApproved = (r, projectField) => {
       const d = String(r.submittedAt || '').slice(0, 10);
       if (d < startDate || d > endDate) return false;
       const s = (r.status || '').toLowerCase();
-      return s === 'approved' || s === '';
+      if (s !== 'approved' && s !== '') return false;
+      // Optional project filter applied AFTER alias resolution
+      if (projectFilter) {
+        const resolved = resolveName(projectField);
+        if (resolved !== projectFilter) return false;
+      }
+      return true;
     };
 
     // ---- 1. Toolbox Talks by project ----
     const toolboxByProject = groupCount(
-      toolboxRows.filter(inRangeApproved),
-      r => r.project || '(unspecified)',
+      toolboxRows.filter(r => inRangeApproved(r, r.project)),
+      r => resolveName(r.project),
     );
 
     // ---- 2. Induction by project ----
     const inductionByProject = groupCount(
-      inductionRows.filter(inRangeApproved),
-      r => r.project || '(unspecified)',
+      inductionRows.filter(r => inRangeApproved(r, r.project)),
+      r => resolveName(r.project),
     );
 
     // ---- 3. EHS Audit — sum of unsafe acts + conditions per project ----
+    // EHS Audit uses 'Site Name' as its field key per forms-config, so check both.
     const ehsByProject = {};
-    for (const r of ehsAuditRows.filter(inRangeApproved)) {
-      const key = r.project || '(unspecified)';
+    for (const r of ehsAuditRows) {
+      const projectField = r.site || r.project;
+      if (!inRangeApproved(r, projectField)) continue;
+      const key = resolveName(projectField);
       if (!ehsByProject[key]) ehsByProject[key] = { unsafeActs: 0, unsafeConditions: 0 };
       ehsByProject[key].unsafeActs += r.unsafeActs;
       ehsByProject[key].unsafeConditions += r.unsafeConditions;
@@ -177,12 +206,13 @@ router.get('/charts', async (req, res) => {
       .map(([project, v]) => ({ project, unsafeActs: v.unsafeActs, unsafeConditions: v.unsafeConditions }))
       .sort((a, b) => (b.unsafeActs + b.unsafeConditions) - (a.unsafeActs + a.unsafeConditions));
 
-    // ---- 4. Incidents by project + accident type ----
-    // For each project, count by accident type (Major / Minor / Near Miss / Unspecified)
+    // ---- 4. Incidents by project/site + accident type ----
+    // Incident form uses 'Site Name' field key.
     const incidentByProject = {};
-    for (const r of incidentRows.filter(inRangeApproved)) {
-      // Incident form uses 'Site Name', not 'Project Name' — fall back to site
-      const key = (r.project || r.site || '(unspecified)');
+    for (const r of incidentRows) {
+      const projectField = r.site || r.project;
+      if (!inRangeApproved(r, projectField)) continue;
+      const key = resolveName(projectField);
       if (!incidentByProject[key]) {
         incidentByProject[key] = { Major: 0, Minor: 0, 'Near Miss': 0, Unspecified: 0 };
       }
@@ -204,14 +234,17 @@ router.get('/charts', async (req, res) => {
       }))
       .sort((a, b) => b.total - a.total);
 
-    // ---- 5. Permit Records by site ----
+    // ---- 5. Permit Records by site/project ----
+    // Permit Record form uses 'Project Name' field key per forms-config.
     const permitBySite = groupCount(
-      permitRows.filter(inRangeApproved),
-      r => r.site || r.project || '(unspecified)',
+      permitRows.filter(r => inRangeApproved(r, r.project || r.site)),
+      r => resolveName(r.project || r.site),
     );
 
     res.json({
       range: { startDate, endDate },
+      projectFilter: projectFilter || null,
+      availableProjects: allProjects.map(p => ({ id: p.id, name: p.name, active: p.active })),
       toolbox: toolboxByProject,
       induction: inductionByProject,
       ehsAudit,

@@ -10,16 +10,21 @@ const photoState = {
 
 let me = null;
 let form = null;
+let activeProjects = [];
 
 (async function init() {
   try {
-    [me, form] = await Promise.all([
+    const [meRes, formRes, projectsRes] = await Promise.all([
       fetch('/api/me').then(r => r.json()),
       fetch(`/api/forms/${encodeURIComponent(formId)}`).then(r => {
         if (!r.ok) throw new Error('Form not found');
         return r.json();
       }),
+      fetch('/api/projects').then(r => r.ok ? r.json() : []).catch(() => []),
     ]);
+    me = meRes;
+    form = formRes;
+    activeProjects = projectsRes;
   } catch (err) {
     document.getElementById('form-mount').innerHTML = `<p>Form not found.</p>`;
     return;
@@ -131,6 +136,25 @@ function renderField(f) {
         <option value="">— select —</option>
         ${f.options.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}
       </select>`);
+    case 'project':
+      // Dropdown of active projects (managed by admins in Settings)
+      // Falls back to a free-text field if no projects are configured yet.
+      if (!activeProjects || activeProjects.length === 0) {
+        return wrap(`
+          <input class="field-input" type="text" name="${f.key}"
+                 placeholder="Project name (no projects configured — ask admin)"
+                 ${f.required ? 'required' : ''}>
+        `);
+      }
+      return wrap(`
+        <select class="field-select" name="${f.key}" ${f.required ? 'required' : ''}>
+          <option value="">— select project —</option>
+          ${activeProjects.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}
+        </select>
+        ${me.isAdmin ? `<div class="field-hint" style="margin-top:6px;font-size:11px;">
+          <a href="/admin-settings" target="_blank" style="color:#005B96;">Manage projects →</a>
+        </div>` : ''}
+      `);
     case 'radio':
       return wrap(`<div class="field-radio-group">
         ${f.options.map(o => `

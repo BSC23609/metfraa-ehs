@@ -50,6 +50,7 @@ let lastData = null;
   // Event handlers
   document.getElementById('apply-range').addEventListener('click', () => loadCharts());
   document.getElementById('refresh-btn').addEventListener('click', () => loadCharts(true));
+  document.getElementById('filter-project').addEventListener('change', () => loadCharts());
 
   document.querySelectorAll('.preset-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -117,7 +118,10 @@ async function loadCharts(forceFresh = false) {
   }
 
   try {
-    const data = await fetch(`/api/admin/charts?startDate=${startDate}&endDate=${endDate}`).then(r => {
+    const params = new URLSearchParams({ startDate, endDate });
+    const projectFilter = document.getElementById('filter-project').value;
+    if (projectFilter) params.set('project', projectFilter);
+    const data = await fetch(`/api/admin/charts?${params}`).then(r => {
       if (!r.ok) return r.json().then(j => Promise.reject(new Error(j.error || `HTTP ${r.status}`)));
       return r.json();
     });
@@ -133,34 +137,112 @@ async function loadCharts(forceFresh = false) {
 }
 
 function render(data) {
+  const filterLabel = data.projectFilter ? ` · Filtered by: ${data.projectFilter}` : '';
   document.getElementById('range-subtitle').textContent =
-    `${formatDateLong(data.range.startDate)} → ${formatDateLong(data.range.endDate)}`;
+    `${formatDateLong(data.range.startDate)} → ${formatDateLong(data.range.endDate)}${filterLabel}`;
+
+  // Populate project filter dropdown (preserve current selection)
+  const projectSelect = document.getElementById('filter-project');
+  const currentSelection = projectSelect.value;
+  const allProjects = data.availableProjects || [];
+  projectSelect.innerHTML = '<option value="">All projects</option>' +
+    allProjects
+      .filter(p => p.active)
+      .map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`)
+      .join('') +
+    (allProjects.some(p => !p.active)
+      ? '<optgroup label="Deactivated">' +
+        allProjects.filter(p => !p.active)
+          .map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('') +
+        '</optgroup>'
+      : '');
+  projectSelect.value = currentSelection || data.projectFilter || '';
+
+  // Compute summary totals for the 6th tile
+  const totals = {
+    tbt: sumCount(data.toolbox),
+    induction: sumCount(data.induction),
+    unsafeActs: (data.ehsAudit || []).reduce((s, d) => s + d.unsafeActs, 0),
+    unsafeConditions: (data.ehsAudit || []).reduce((s, d) => s + d.unsafeConditions, 0),
+    incidents: (data.incident || []).reduce((s, d) => s + d.total, 0),
+    permits: sumCount(data.permitRecord),
+  };
 
   document.getElementById('charts-mount').innerHTML = `
-    ${chartSection({
-      id: 'toolbox',
-      title: 'Toolbox Talks',
-      subtitle: 'Number of TBTs conducted per project',
-      data: data.toolbox,
-      total: sumCount(data.toolbox),
-    })}
-    ${chartSection({
-      id: 'induction',
-      title: 'Inductions',
-      subtitle: 'Number of inductions conducted per project',
-      data: data.induction,
-      total: sumCount(data.induction),
-    })}
-    ${ehsAuditChartSection(data.ehsAudit)}
-    ${incidentChartSection(data.incident)}
-    ${chartSection({
-      id: 'permit',
-      title: 'Permit Records',
-      subtitle: 'Number of permits recorded per site',
-      data: data.permitRecord,
-      total: sumCount(data.permitRecord),
-      labelHeader: 'Site',
-    })}
+    <div class="charts-grid">
+      ${chartSection({
+        id: 'toolbox',
+        title: 'Toolbox Talks',
+        subtitle: 'TBTs per project',
+        data: data.toolbox,
+        total: totals.tbt,
+      })}
+      ${chartSection({
+        id: 'induction',
+        title: 'Inductions',
+        subtitle: 'Inductions per project',
+        data: data.induction,
+        total: totals.induction,
+      })}
+      ${ehsAuditChartSection(data.ehsAudit)}
+      ${incidentChartSection(data.incident)}
+      ${chartSection({
+        id: 'permit',
+        title: 'Permit Records',
+        subtitle: 'Permits per site',
+        data: data.permitRecord,
+        total: totals.permits,
+        labelHeader: 'Site',
+      })}
+      ${summaryTile(totals, data)}
+    </div>
+  `;
+}
+
+// ----------------------------------------------------------------------------
+// Summary tile (6th slot) — at-a-glance totals
+// ----------------------------------------------------------------------------
+
+function summaryTile(t, data) {
+  const projectCount = (data.availableProjects || []).filter(p => p.active).length;
+  return `
+    <section class="dash-section chart-section summary-tile">
+      <div class="dash-section__head">
+        <div>
+          <h3>Summary</h3>
+          <div class="chart-subtitle">Period totals across all forms</div>
+        </div>
+      </div>
+      <div class="summary-grid">
+        <div class="summary-cell summary-cell--blue">
+          <div class="summary-cell__num">${t.tbt}</div>
+          <div class="summary-cell__label">Toolbox Talks</div>
+        </div>
+        <div class="summary-cell summary-cell--blue">
+          <div class="summary-cell__num">${t.induction}</div>
+          <div class="summary-cell__label">Inductions</div>
+        </div>
+        <div class="summary-cell summary-cell--amber">
+          <div class="summary-cell__num">${t.unsafeActs}</div>
+          <div class="summary-cell__label">Unsafe Acts</div>
+        </div>
+        <div class="summary-cell summary-cell--red">
+          <div class="summary-cell__num">${t.unsafeConditions}</div>
+          <div class="summary-cell__label">Unsafe Conditions</div>
+        </div>
+        <div class="summary-cell summary-cell--red">
+          <div class="summary-cell__num">${t.incidents}</div>
+          <div class="summary-cell__label">Incidents</div>
+        </div>
+        <div class="summary-cell summary-cell--blue">
+          <div class="summary-cell__num">${t.permits}</div>
+          <div class="summary-cell__label">Permits</div>
+        </div>
+      </div>
+      <div class="summary-footer">
+        ${projectCount} active project${projectCount === 1 ? '' : 's'} tracked
+      </div>
+    </section>
   `;
 }
 
@@ -196,7 +278,7 @@ function chartSection({ id, title, subtitle, data, total, labelHeader }) {
     const val = Math.round((ySteps / 4) * t);
     const y = M_TOP + PLOT_H - (val / ySteps) * PLOT_H;
     yLines.push(`<line x1="${M_LEFT}" y1="${y}" x2="${VB_W - M_RIGHT}" y2="${y}" stroke="#E5E5E5" stroke-width="1"/>`);
-    yLines.push(`<text x="${M_LEFT - 8}" y="${y + 4}" text-anchor="end" font-size="12" fill="#999">${val}</text>`);
+    yLines.push(`<text x="${M_LEFT - 8}" y="${y + 6}" text-anchor="end" font-size="20" fill="#999">${val}</text>`);
   }
 
   // Bars
@@ -206,12 +288,12 @@ function chartSection({ id, title, subtitle, data, total, labelHeader }) {
     const barH = (d.count / ySteps) * PLOT_H;
     const barY = M_TOP + PLOT_H - barH;
 
-    const totalLabel = `<text x="${cx.toFixed(2)}" y="${(barY - 6).toFixed(2)}" text-anchor="middle" font-size="12" fill="#5A5A5A" font-weight="700">${d.count}</text>`;
+    const totalLabel = `<text x="${cx.toFixed(2)}" y="${(barY - 8).toFixed(2)}" text-anchor="middle" font-size="22" fill="#2A2A2A" font-weight="700">${d.count}</text>`;
 
-    // Rotated project label
-    const labelY = M_TOP + PLOT_H + 14;
-    const truncatedLabel = truncateLabel(d.label, 28);
-    const xLabel = `<text x="${cx.toFixed(2)}" y="${labelY}" text-anchor="end" font-size="11" fill="#2A2A2A" transform="rotate(-40 ${cx.toFixed(2)} ${labelY})">${escapeHtml(truncatedLabel)}</text>`;
+    // Rotated project label — truncate aggressively for grid tiles
+    const labelY = M_TOP + PLOT_H + 22;
+    const truncatedLabel = truncateLabel(d.label, 14);
+    const xLabel = `<text x="${cx.toFixed(2)}" y="${labelY}" text-anchor="end" font-size="20" fill="#2A2A2A" transform="rotate(-40 ${cx.toFixed(2)} ${labelY})">${escapeHtml(truncatedLabel)}</text>`;
 
     return `<g>
       <rect x="${barX.toFixed(2)}" y="${barY.toFixed(2)}" width="${barW.toFixed(2)}" height="${barH.toFixed(2)}" fill="#005B96" rx="2">
@@ -234,7 +316,6 @@ function chartSection({ id, title, subtitle, data, total, labelHeader }) {
         <svg viewBox="0 0 ${VB_W} ${VB_H}" preserveAspectRatio="xMidYMid meet" class="chart-svg" xmlns="http://www.w3.org/2000/svg">
           ${yLines.join('')}
           ${bars}
-          <text x="${VB_W / 2}" y="${VB_H - 8}" text-anchor="middle" font-size="12" fill="#5A5A5A" font-weight="600">${escapeHtml(labelText)}</text>
         </svg>
       </div>
     </section>
@@ -270,7 +351,7 @@ function ehsAuditChartSection(data) {
     const val = Math.round((ySteps / 4) * t);
     const y = M_TOP + PLOT_H - (val / ySteps) * PLOT_H;
     yLines.push(`<line x1="${M_LEFT}" y1="${y}" x2="${VB_W - M_RIGHT}" y2="${y}" stroke="#E5E5E5" stroke-width="1"/>`);
-    yLines.push(`<text x="${M_LEFT - 8}" y="${y + 4}" text-anchor="end" font-size="12" fill="#999">${val}</text>`);
+    yLines.push(`<text x="${M_LEFT - 8}" y="${y + 6}" text-anchor="end" font-size="20" fill="#999">${val}</text>`);
   }
 
   const bars = data.map((d, i) => {
@@ -284,13 +365,13 @@ function ehsAuditChartSection(data) {
     const condY = M_TOP + PLOT_H - condH;
 
     const actsLabel = d.unsafeActs > 0
-      ? `<text x="${(leftBarX + barW / 2).toFixed(2)}" y="${(actsY - 5).toFixed(2)}" text-anchor="middle" font-size="10" fill="#C77A00" font-weight="700">${d.unsafeActs}</text>` : '';
+      ? `<text x="${(leftBarX + barW / 2).toFixed(2)}" y="${(actsY - 8).toFixed(2)}" text-anchor="middle" font-size="18" fill="#C77A00" font-weight="700">${d.unsafeActs}</text>` : '';
     const condLabel = d.unsafeConditions > 0
-      ? `<text x="${(rightBarX + barW / 2).toFixed(2)}" y="${(condY - 5).toFixed(2)}" text-anchor="middle" font-size="10" fill="#C0392B" font-weight="700">${d.unsafeConditions}</text>` : '';
+      ? `<text x="${(rightBarX + barW / 2).toFixed(2)}" y="${(condY - 8).toFixed(2)}" text-anchor="middle" font-size="18" fill="#C0392B" font-weight="700">${d.unsafeConditions}</text>` : '';
 
-    const labelY = M_TOP + PLOT_H + 14;
-    const truncatedLabel = truncateLabel(d.project, 28);
-    const xLabel = `<text x="${cx.toFixed(2)}" y="${labelY}" text-anchor="end" font-size="11" fill="#2A2A2A" transform="rotate(-40 ${cx.toFixed(2)} ${labelY})">${escapeHtml(truncatedLabel)}</text>`;
+    const labelY = M_TOP + PLOT_H + 22;
+    const truncatedLabel = truncateLabel(d.project, 14);
+    const xLabel = `<text x="${cx.toFixed(2)}" y="${labelY}" text-anchor="end" font-size="20" fill="#2A2A2A" transform="rotate(-40 ${cx.toFixed(2)} ${labelY})">${escapeHtml(truncatedLabel)}</text>`;
 
     return `<g>
       <rect x="${leftBarX.toFixed(2)}" y="${actsY.toFixed(2)}" width="${barW.toFixed(2)}" height="${actsH.toFixed(2)}" fill="#C77A00" rx="2">
@@ -324,7 +405,6 @@ function ehsAuditChartSection(data) {
         <svg viewBox="0 0 ${VB_W} ${VB_H}" preserveAspectRatio="xMidYMid meet" class="chart-svg" xmlns="http://www.w3.org/2000/svg">
           ${yLines.join('')}
           ${bars}
-          <text x="${VB_W / 2}" y="${VB_H - 8}" text-anchor="middle" font-size="12" fill="#5A5A5A" font-weight="600">Project</text>
         </svg>
       </div>
     </section>
@@ -359,7 +439,7 @@ function incidentChartSection(data) {
     const val = Math.round((ySteps / 4) * t);
     const y = M_TOP + PLOT_H - (val / ySteps) * PLOT_H;
     yLines.push(`<line x1="${M_LEFT}" y1="${y}" x2="${VB_W - M_RIGHT}" y2="${y}" stroke="#E5E5E5" stroke-width="1"/>`);
-    yLines.push(`<text x="${M_LEFT - 8}" y="${y + 4}" text-anchor="end" font-size="12" fill="#999">${val}</text>`);
+    yLines.push(`<text x="${M_LEFT - 8}" y="${y + 6}" text-anchor="end" font-size="20" fill="#999">${val}</text>`);
   }
 
   const bars = data.map((d, i) => {
@@ -384,11 +464,11 @@ function incidentChartSection(data) {
     drawSeg(d.nearMiss, '#F2B93B', 'Near Miss');
     drawSeg(d.unspecified, '#9AA0A6', 'Unspecified');
 
-    const totalLabel = `<text x="${cx.toFixed(2)}" y="${(yCursor - 6).toFixed(2)}" text-anchor="middle" font-size="12" fill="#5A5A5A" font-weight="700">${d.total}</text>`;
+    const totalLabel = `<text x="${cx.toFixed(2)}" y="${(yCursor - 8).toFixed(2)}" text-anchor="middle" font-size="22" fill="#2A2A2A" font-weight="700">${d.total}</text>`;
 
-    const labelY = M_TOP + PLOT_H + 14;
-    const truncatedLabel = truncateLabel(d.project, 28);
-    const xLabel = `<text x="${cx.toFixed(2)}" y="${labelY}" text-anchor="end" font-size="11" fill="#2A2A2A" transform="rotate(-40 ${cx.toFixed(2)} ${labelY})">${escapeHtml(truncatedLabel)}</text>`;
+    const labelY = M_TOP + PLOT_H + 22;
+    const truncatedLabel = truncateLabel(d.project, 14);
+    const xLabel = `<text x="${cx.toFixed(2)}" y="${labelY}" text-anchor="end" font-size="20" fill="#2A2A2A" transform="rotate(-40 ${cx.toFixed(2)} ${labelY})">${escapeHtml(truncatedLabel)}</text>`;
 
     return `<g>${segments.join('')}${totalLabel}${xLabel}</g>`;
   }).join('');
@@ -419,7 +499,6 @@ function incidentChartSection(data) {
         <svg viewBox="0 0 ${VB_W} ${VB_H}" preserveAspectRatio="xMidYMid meet" class="chart-svg" xmlns="http://www.w3.org/2000/svg">
           ${yLines.join('')}
           ${bars}
-          <text x="${VB_W / 2}" y="${VB_H - 8}" text-anchor="middle" font-size="12" fill="#5A5A5A" font-weight="600">Project / Site</text>
         </svg>
       </div>
     </section>

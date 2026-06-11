@@ -25,6 +25,7 @@
       <a href="/" class="app-header__btn">All Forms</a>
       <a href="/submissions" class="app-header__btn">Submissions</a>
       <a href="/admin-dashboard" class="app-header__btn">Dashboard</a>
+      <a href="/admin-settings" class="app-header__btn">Settings</a>
       <a href="/auth/logout" class="app-header__btn">Logout</a>
     </div>
   </header>
@@ -47,6 +48,12 @@
       <div class="filter-field">
         <label>To date</label>
         <input type="date" id="filter-end">
+      </div>
+      <div class="filter-field">
+        <label>Project</label>
+        <select id="filter-project">
+          <option value="">All projects</option>
+        </select>
       </div>
       <div class="filter-field" style="flex:0 0 auto;">
         <label>Quick presets</label>

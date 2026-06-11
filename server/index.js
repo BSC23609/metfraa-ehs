@@ -12,6 +12,7 @@ const formRoutes = require('./routes/forms');
 const adminRoutes = require('./routes/admin');
 const adminDashboardRoutes = require('./routes/admin-dashboard');
 const adminChartsRoutes = require('./routes/admin-charts');
+const adminSettingsRoutes = require('./routes/admin-settings');
 const debugRoutes = require('./routes/debug');
 const submissionRoutes = require('./routes/submissions');
 const approvalRoutes = require('./routes/approvals');
@@ -128,6 +129,9 @@ app.use('/api/admin', adminDashboardRoutes);
 //     /api/admin/dashboard. Other unmatched paths fall through.
 app.use('/api/admin', adminChartsRoutes);
 
+// --- Admin Settings API (mounts /api/projects + /api/admin/projects)
+app.use('/', adminSettingsRoutes);
+
 // --- Admin routes (legacy info page kept for now)
 app.use('/admin', adminRoutes);
 
@@ -149,6 +153,11 @@ app.get('/admin-dashboard', (req, res) => {
 // --- Admin Charts page (admin-only project/site breakdowns)
 app.get('/admin-charts', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'admin-charts.html'));
+});
+
+// --- Admin Settings page (admin-only project CRUD)
+app.get('/admin-settings', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'admin-settings.html'));
 });
 
 // --- Approvals list page

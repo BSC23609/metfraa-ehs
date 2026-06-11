@@ -1,108 +1,151 @@
-# Project Charts feature + Accident Type field on Incident form
+# Projects Management + 3x2 Grid Charts
 
-A new admin-only page at /admin-charts that shows 5 bar charts aggregating
-data from the master logs.
+Adds a projects database (dropdown for forms, settings page for admins)
+and reorganizes the charts into a 3x2 tile grid with a project filter.
 
-## What this delivers
+## What you get
 
-### 1. NEW: Accident Type field on Incident form
-Added a required radio field with options Major / Minor / Near Miss to the
-Incident / Accident Report form. Sits between the existing "Incident Type"
-and "Injury Details" fields.
+### 1. Project dropdown on every form
+All 21 forms used to have a free-text "Project Name" / "Site Name" field.
+Now it's a dropdown populated from the projects list. Same shared list for
+both "Project" and "Site" fields.
 
-### 2. NEW: Project Charts page at /admin-charts
-Admin-only page with 5 bar charts:
+Default seed projects (created automatically on first run):
+- AMNS Site - Oragadam
+- KGISL Auditorium
+- Patanjali
+- Apollo
 
-1. **Toolbox Talks** - count of TBTs per project_name
-2. **Inductions** - count of inductions per project_name
-3. **EHS Audit** - grouped bars: sum of unsafe acts + sum of unsafe conditions per project
-4. **Incidents / Accidents** - stacked bars by accident type (Major/Minor/Near Miss + Unspecified for old rows) per project/site
-5. **Permit Records** - count per site_name
+### 2. Settings page at /admin-settings (admin-only)
+Full CRUD for projects:
+- Add new project (with optional aliases)
+- Rename project
+- Deactivate / Reactivate (deactivated projects hide from form dropdowns
+  but still appear on charts for historical context)
+- Manage aliases (legacy free-text names that should map to this project)
+- Delete project permanently
 
-### 3. Date filter with presets
-- Today
-- Yesterday
-- This Week (Monday through today)
-- This Month (1st through today)
-- This Year (Jan 1 through today)
-- Custom date range
+### 3. Alias support for old free-text entries
+Existing master log rows have free-text values like "TEST5",
+"AMNS site - Oragadam", "test", etc. By adding these as aliases to a
+project, they automatically roll up to the canonical name on charts.
 
-### 4. Only approved submissions counted
-Rejected and pending submissions are excluded from the counts. Empty status
-(legacy rows from before the approval workflow) is treated as approved.
+Example workflow:
+1. Open /admin-settings
+2. Click "Edit" on "AMNS Site - Oragadam"
+3. In the Aliases field, add (one per line):
+     TEST5
+     AMNS
+     amns oragadam
+4. Save
+5. Charts now show all those old entries under "AMNS Site - Oragadam"
 
-### 5. Navigation links added
-- /admin-dashboard (existing) now has a "Charts" link in its header
-- /admin-charts (new) has a "Dashboard" link to go back
-- Main dashboard now shows a "Charts" button for admins next to "Admin"
+Unmatched free-text entries appear under their raw name on the chart
+(e.g. random old "TEST" entries that aren't aliased to anything). You
+can either alias them or ignore them.
+
+### 4. 3x2 grid charts layout
+The 5 charts now display in a 3x2 tile grid (was vertical scroll):
+
+  Row 1: Toolbox Talks  |  Inductions  |  EHS Audit
+  Row 2: Incidents      |  Permits     |  Summary
+
+The Summary tile in slot 6 shows period totals at-a-glance across all
+forms (TBTs, Inductions, Unsafe Acts, Unsafe Conditions, Incidents,
+Permits) plus a count of active projects.
+
+All 6 tiles fit on one screen for a single screenshot.
+
+### 5. Project filter on charts page
+New dropdown above the charts: "Project ▼ [All projects | AMNS… | …]".
+Selecting a project filters all 5 charts to show only that project's
+data — including alias-resolved historical entries.
+
+## Where projects live (technical)
+
+Stored as JSON at:
+  Metfraa-EHS/_config/projects.json   (in OneDrive)
+
+Created automatically with the 4 seed projects on first read if missing.
+Cached server-side for 30 seconds. Cache busts on any CRUD operation
+and when approvals happen.
 
 ## Files in this update
 
-### NEW files (4)
-- server/routes/admin-charts.js     - aggregation API
-- public/admin-charts.html          - page shell
-- public/css/admin-charts.css       - styles
-- public/js/admin-charts.js         - chart rendering
+### NEW files (5)
+- server/lib/projects-store.js        - read/write projects.json + alias lookup
+- server/routes/admin-settings.js     - CRUD API
+- public/admin-settings.html          - settings page
+- public/css/admin-settings.css       - settings styles
+- public/js/admin-settings.js         - settings client logic
 
-### MODIFIED files (6)
-- server/index.js                   - wires up new route + page
-- server/lib/forms-config.js        - adds Accident Type field to Incident form
-- server/routes/approvals.js        - invalidates charts cache on approve/reject
-- public/dashboard.html             - adds Charts button (admin only)
-- public/admin-dashboard.html       - adds Charts link in header
-- public/js/dashboard.js            - shows Charts button for admins
-
-## IMPORTANT: One-time manual fix for Incident master log
-
-The Incident form now has a new "Accident Type" field positioned BETWEEN
-"Incident Type" and "Injury Details". Existing _MasterLog.xlsx for incidents
-has its columns laid out without this new column.
-
-After deploying this code, you MUST manually add the "Accident Type" column
-header in the existing Incident master log file. If you skip this step,
-NEW incident approvals will write data into the wrong columns.
-
-### How to fix the Incident master log (one-time, before/just after deploy)
-
-1. Open `04-Incident-Reports/_MasterLog.xlsx` in OneDrive (Excel Online or download)
-2. Find the "Incident Type" column header (currently around column L or M)
-3. Insert a NEW column immediately to the RIGHT of "Incident Type":
-   - Right-click the column letter for "Injury Details" -> Insert
-4. Type "Accident Type" as the new column header (row 1)
-5. Apply the same formatting as the other headers (blue background, white bold text)
-6. Save and close
-
-Old incident rows will have a blank "Accident Type" cell -- they'll show up
-on the chart under "Unspecified" until you manually fill them in (optional).
-NEW incident submissions will require selecting Major/Minor/Near Miss and
-will populate this column automatically.
-
-If you don't have any pending incident approvals or existing logs, you can
-skip this step -- the master log will be recreated when the first approval
-happens.
+### MODIFIED files (10)
+- server/index.js                     - wires up settings routes + page
+- server/lib/forms-config.js          - changes 21 fields from 'text' to 'project'
+- server/routes/admin-charts.js       - alias resolution + project filter param
+- public/admin-charts.html            - project filter dropdown in filter bar
+- public/css/admin-charts.css         - 3x2 grid layout + summary tile styles
+- public/js/admin-charts.js           - grid rendering + summary tile + filter wiring
+- public/dashboard.html               - adds Settings link (admin only)
+- public/admin-dashboard.html         - adds Settings link in header nav
+- public/js/dashboard.js              - shows Settings link for admins
+- public/js/form.js                   - renders dropdown for project-type fields
 
 ## How to apply
 
-1. Drop these 10 files into your repo (matching the folder structure)
-2. Manually fix the Incident master log header (see above)
-3. Commit and push to GitHub
-4. Render auto-deploys
-5. Sign in as an admin, click "Charts" in the header
+1. Drop these 15 files into your repo (matching folder structure)
+2. Commit and push to GitHub
+3. Render auto-deploys
+4. Sign in as admin → "Settings" → see the 4 seed projects already there
+5. Click "Charts" → see the new 3x2 layout
 
-## Testing checklist after deploy
+## Test checklist after deploy
 
-1. Open /admin-charts as admin -> 5 chart sections render (some may be empty)
-2. Click each date preset (Today, Yesterday, This Week, This Month, This Year)
-3. Type a custom date range and click Apply
-4. Submit a new Incident form -> verify "Accident Type" radio is required
-5. Approve the incident -> check it appears in the Incidents chart
-6. Open the Incident _MasterLog.xlsx -> verify the new accident_type value
-   landed in the right column (the manually-added "Accident Type" column)
+1. /admin-settings shows 4 active projects (auto-seeded)
+2. Click "Edit" on a project, add an alias, Save → no errors
+3. Click "Deactivate" → project moves to "Deactivated" section
+4. Click "Reactivate" → back to active
+5. Open any form (e.g. Toolbox Talks) → "Project Name" is now a dropdown
+6. Submit a form using one of the dropdown values → approves normally
+7. /admin-charts now shows 3x2 tile layout with 6th slot = Summary
+8. Click "Project" dropdown filter → select a project → all charts
+   filter to that project only
+9. Manage aliases for a project, set them to match old free-text values,
+   refresh charts → old entries now grouped under canonical project name
 
-## Notes
+## Migration tips for existing data
 
-- 60-second cache on the charts API for performance
-- Cache auto-invalidates when approvals/rejections happen
-- Empty date ranges render a clean "No data" empty state per chart
-- Project/site names with extra whitespace are trimmed but not normalized
-  for case -- "AMNS site" and "amns site" will be separate bars
+Your existing forms had free-text project names. To clean up the charts:
+
+1. Visit /admin-charts (default = This Month) — see what raw names appear
+2. For each raw name that should map to one of your real projects:
+   a. Open /admin-settings
+   b. Click Edit on the target project
+   c. Add the raw name as an alias
+   d. Save
+3. Charts auto-update — that raw name now rolls up to the canonical name
+4. Any leftover raw names that are genuine test data — either leave them
+   (they'll show as their own bars), or create a "Test / Other" project
+   and alias them under it
+
+## Behavior notes
+
+- Forms now FORCE selecting from the dropdown — users can't type a custom
+  project name. If their site isn't listed, an admin must add it first.
+  For admins, the form shows a "Manage projects →" link below the dropdown
+  for quick access.
+- Deactivated projects still appear in the chart project filter dropdown
+  (in a separate "Deactivated" optgroup) so admins can review their history.
+- Deleting a project removes it from the dropdown but does NOT delete any
+  master log rows. The historical data lives in OneDrive master logs forever.
+- Aliases are case-insensitive ("test5" matches "TEST5" matches "Test5").
+- An empty projects.json (e.g. you delete all 4 seeds) makes form dropdowns
+  fall back to free-text inputs as a safety net.
+
+## What didn't change
+
+- The approval workflow (forms still go to pending → approver reviews → approved)
+- The Incident form's Accident Type field (still required radio)
+- Master log column layouts
+- Existing Approved submissions and their PDFs
+- Authentication and login flow

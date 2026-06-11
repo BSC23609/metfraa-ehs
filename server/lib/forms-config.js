@@ -37,7 +37,7 @@ const TOOLBOX = {
   folder: '01-Toolbox-Talks',
   icon: '🛠️',
   fields: [
-    { key: 'project_name',     label: 'Project Name',                       type: 'text',     required: true },
+    { key: 'project_name',     label: 'Project Name',                       type: 'project',     required: true },
     { key: 'participants',     label: 'No. of Persons Participated',        type: 'number',   required: true, min: 1 },
     { key: 'date',             label: 'Date',                               type: 'date',     required: true, autofill: 'today' },
     { key: 'time',             label: 'Time',                               type: 'time',     required: true, autofill: 'now' },
@@ -57,7 +57,7 @@ const INDUCTION = {
   folder: '02-Induction',
   icon: '👷',
   fields: [
-    { key: 'project_name',         label: 'Project Name',                   type: 'text',     required: true },
+    { key: 'project_name',         label: 'Project Name',                   type: 'project',     required: true },
     { key: 'project_location',     label: 'Project Location',               type: 'text',     required: true },
     { key: 'induction_date',       label: 'Date of Induction',              type: 'date',     required: true, autofill: 'today' },
     { key: 'employee_name',        label: 'Employee / Worker Name',         type: 'text',     required: true },
@@ -81,7 +81,7 @@ const EHS_AUDIT = {
   fields: [
     { key: 'audit_date',           label: 'Audit Conducted Date',           type: 'date',     required: true, autofill: 'today' },
     { key: 'auditee',              label: 'Auditee',                        type: 'inspector',required: true },
-    { key: 'site_name',            label: 'Site Name',                      type: 'text',     required: true },
+    { key: 'site_name',            label: 'Site Name',                      type: 'project',     required: true },
     { key: 'exact_location',       label: 'Exact Location',                 type: 'text',     required: true },
     { key: 'observation',          label: 'Observation',                    type: 'textarea', required: true },
     { key: 'photo_evidence',       label: 'Photographic Evidence',          type: 'photo',    required: true, multiple: true },
@@ -102,7 +102,7 @@ const INCIDENT = {
   folder: '04-Incident-Reports',
   icon: '⚠️',
   fields: [
-    { key: 'site_name',            label: 'Site Name',                      type: 'text',     required: true },
+    { key: 'site_name',            label: 'Site Name',                      type: 'project',     required: true },
     { key: 'incident_date',        label: 'Date of Incident',               type: 'date',     required: true },
     { key: 'incident_time',        label: 'Time of Incident',               type: 'time',     required: true },
     { key: 'area_location',        label: 'Area / Location',                type: 'text',     required: true },
@@ -136,7 +136,7 @@ const HSE_MEETING = {
   folder: '05-HSE-Meetings',
   icon: '👥',
   fields: [
-    { key: 'project_name',         label: 'Project Name',                   type: 'text',     required: true },
+    { key: 'project_name',         label: 'Project Name',                   type: 'project',     required: true },
     { key: 'project_location',     label: 'Project Location',               type: 'text',     required: true },
     { key: 'no_of_persons',        label: 'No. of Persons',                 type: 'number',   required: true, min: 1 },
     { key: 'meeting_no',           label: 'Meeting No.',                    type: 'text',     required: true },
@@ -158,7 +158,7 @@ const PERMIT_RECORD = {
   folder: '07-Permit-Records',
   icon: '📋',
   fields: [
-    { key: 'project_name',         label: 'Project Name',                   type: 'text',     required: true },
+    { key: 'project_name',         label: 'Project Name',                   type: 'project',     required: true },
     { key: 'date',                 label: 'Date',                           type: 'date',     required: true, autofill: 'today' },
     { key: 'time',                 label: 'Time',                           type: 'time',     required: true, autofill: 'now' },
     { key: 'work_location',        label: 'Exact Location of Work',         type: 'text',     required: true },
@@ -191,7 +191,7 @@ function makeEquipmentForm({ id, code, title, folder, icon, checklist }) {
     folder,
     icon,
     fields: [
-      { key: 'project_name',     label: 'Project Name',                     type: 'text',     required: true },
+      { key: 'project_name',     label: 'Project Name',                     type: 'project',     required: true },
       { key: 'inspection_date',  label: 'Date of Inspection',               type: 'date',     required: true, autofill: 'today' },
       { key: 'inspection_time',  label: 'Time',                             type: 'time',     required: true, autofill: 'now' },
       { key: 'equipment_no',     label: 'Equipment No.',                    type: 'text',     required: true },
